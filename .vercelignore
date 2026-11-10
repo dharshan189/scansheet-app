@@ -10,4 +10,9 @@ ocr_server.py
 ocr_pipeline.py
 ocr-requirements.txt
 README.md
+android/
+www/
+.github/
+scripts/
+capacitor.config.json
 

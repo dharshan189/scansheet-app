@@ -17,6 +17,7 @@ import { History } from './history.js';
 import { Auth } from './auth.js';
 import { ImagePreprocessor } from './preprocessor.js';
 import { DocumentExporter } from './export.js';
+import { AppConfig } from './app-config.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COMPUTER VISION TABLE DETECTOR ENGINE
@@ -835,21 +836,45 @@ export const Scanner = {
 
   async runPaddleOCR(file, imageUrl) {
     const endpoints = [];
+    const addEndpoint = (candidate) => {
+      if (candidate && typeof candidate === 'string' && !endpoints.includes(candidate)) {
+        endpoints.push(candidate);
+      }
+    };
+
     if (window.PADDLE_OCR_API_URL) {
-      endpoints.push(window.PADDLE_OCR_API_URL);
+      addEndpoint(window.PADDLE_OCR_API_URL);
     }
 
-    const hostname = window.location.hostname || 'localhost';
-    const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.') || hostname.startsWith('10.');
+    const configuredOcrUrl = AppConfig.getOcrApiUrl();
+    if (configuredOcrUrl) {
+      addEndpoint(configuredOcrUrl);
+    }
 
-    // 1. Same-origin endpoint
-    endpoints.push('/api/scan');
+    if (AppConfig.isCapacitorNative()) {
+      // Never call relative /api/* or http://localhost:5000 from a bundled Android WebView.
+      // Resolve OCR API routes against the deployed HTTPS Vercel base URL when configured.
+      const vercelBase = AppConfig.getVercelApiBaseUrl();
+      if (vercelBase) {
+        addEndpoint(`${vercelBase}/api/scan`);
+        addEndpoint(`${vercelBase}/api/ocr`);
+      }
+      if (endpoints.length === 0) {
+        throw new Error('OCR_BACKEND_UNAVAILABLE: Remote OCR endpoint not configured');
+      }
+    } else {
+      const hostname = window.location.hostname || 'localhost';
+      const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.') || hostname.startsWith('10.');
 
-    // 2. Direct port 5000 probing only in local/LAN development environments
-    if (isLocalHost) {
-      endpoints.push(`http://${hostname}:5000/api/scan`);
-      if (hostname !== '127.0.0.1') endpoints.push('http://127.0.0.1:5000/api/scan');
-      if (hostname !== 'localhost') endpoints.push('http://localhost:5000/api/scan');
+      // 1. Same-origin endpoint
+      addEndpoint('/api/scan');
+
+      // 2. Direct port 5000 probing only in local/LAN development environments
+      if (isLocalHost) {
+        addEndpoint(`http://${hostname}:5000/api/scan`);
+        if (hostname !== '127.0.0.1') addEndpoint('http://127.0.0.1:5000/api/scan');
+        if (hostname !== 'localhost') addEndpoint('http://localhost:5000/api/scan');
+      }
     }
 
     let lastError = null;
@@ -887,6 +912,12 @@ export const Scanner = {
             continue;
           }
           throw lastError;
+        }
+
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+          lastError = new Error(`Non-JSON response from ${url}`);
+          continue;
         }
 
         const data = await response.json();
@@ -2523,7 +2554,7 @@ export const Scanner = {
           UI.showNotification('Note: Exporting text document to Excel: lines placed into spreadsheet rows. (Tip: Use Word or PDF for standard document layout).');
         }
         this.setStatus('Generating Excel workbook (.xlsx)...');
-        DocumentExporter.exportExcel(this.currentDocument, filename);
+        await DocumentExporter.exportExcel(this.currentDocument, filename);
         UI.showNotification(`Successfully exported ${filename}`);
         Utils.announce('Excel spreadsheet downloaded.');
       }

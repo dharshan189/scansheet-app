@@ -4,11 +4,25 @@
 // Never exposes SECRET_ROLE_KEY or database connection strings to the client.
 // ============================================================================
 
+const CAPACITOR_ORIGINS = new Set([
+  'https://localhost',
+  'http://localhost',
+  'capacitor://localhost',
+  'ionic://localhost'
+]);
+
 export default function handler(req, res) {
-  // CORS & Cache prevention headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // CORS & Cache prevention headers (explicitly supports Capacitor Android/iOS & Vercel origins)
+  const origin = req.headers?.origin;
+  if (origin && (CAPACITOR_ORIGINS.has(origin) || /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Requested-With');
+  res.setHeader('Access-Control-Max-Age', '86400');
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
   res.setHeader('Content-Type', 'application/json');
 

@@ -10,6 +10,8 @@ import { Upload } from './upload.js?v=5.2';
 import { History } from './history.js';
 import { Crop } from './crop.js';
 import { Scanner } from './scanner.js';
+import { AppConfig } from './app-config.js';
+import { DocumentExporter } from './export.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
   // Initialize Core Subsystems
@@ -19,6 +21,27 @@ document.addEventListener('DOMContentLoaded', async () => {
   Upload.init();
   History.init();
   Scanner.init();
+
+  // Handle Android hardware Back button cleanly when running in Capacitor
+  if (AppConfig.isCapacitorNative() && window.Capacitor?.Plugins?.App?.addListener) {
+    window.Capacitor.Plugins.App.addListener('backButton', ({ canGoBack }) => {
+      if (UI.mobileDrawer?.classList.contains('open')) {
+        UI.toggleMobileDrawer(false);
+        return;
+      }
+      if (document.querySelector('.modal-backdrop.visible')) {
+        UI.closeAllModals();
+        Scanner.closeMultiExportModal?.();
+        History.close?.();
+        return;
+      }
+      if (canGoBack) {
+        window.history.back();
+      } else {
+        window.Capacitor.Plugins.App.exitApp();
+      }
+    });
+  }
 
   // Pre-warm OCR worker in idle time so scans execute instantly
   if (window.requestIdleCallback) {
@@ -300,6 +323,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   async function handleGoogleAuthRequest() {
+    if (AppConfig.isCapacitorNative()) {
+      UI.showNotification('Google Sign-In popup is restricted inside Android WebView. Please use Email & Password sign-in.');
+      return;
+    }
+
     // Ensure client is initialized
     let client = googleTokenClient || initGoogleIdentity();
 
@@ -1063,14 +1091,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `ScanSheet_Registered_Users_${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    const filename = `ScanSheet_Registered_Users_${new Date().toISOString().slice(0, 10)}.csv`;
+    await DocumentExporter.downloadBlob(blob, filename);
     UI.showNotification(`Exported ${users.length} registered users to CSV.`);
   }
 

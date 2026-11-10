@@ -1,0 +1,12 @@
+{
+  "appId": "com.scansheet.app",
+  "appName": "ScanSheet",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}
+

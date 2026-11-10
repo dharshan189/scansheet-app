@@ -36,7 +36,17 @@ def load_dotenv():
 load_dotenv()
 
 app = Flask(__name__, static_folder=FRONTEND_DIR)
-CORS(app)  # Enable Cross-Origin Resource Sharing for mobile and local dev
+# Enable Cross-Origin Resource Sharing for Capacitor Android/iOS, Vercel, and local dev
+CORS(
+    app,
+    resources={
+        r"/api/*": {
+            "origins": "*",
+            "methods": ["GET", "POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+        }
+    },
+)
 
 @app.route('/api/health', methods=['GET'])
 def health_check():

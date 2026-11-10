@@ -5,7 +5,19 @@
   "type": "module",
   "description": "ScanSheet - OCR Document & Table Recognition Web Application",
   "scripts": {
-    "dev": "python ocr_server.py"
+    "dev": "python ocr_server.py",
+    "cap:prepare": "node scripts/build-web.mjs",
+    "cap:sync": "node scripts/build-web.mjs && npx cap sync android",
+    "verify": "node scripts/verify-capacitor-setup.mjs"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "^8.6.0",
+    "@capacitor/filesystem": "^8.1.5",
+    "@capacitor/share": "^8.0.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.0"
   }
 }
-

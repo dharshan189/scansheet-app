@@ -5,6 +5,7 @@
  */
 
 import { SupabaseConfig } from './supabase-client.js';
+import { AppConfig } from './app-config.js';
 
 export const Auth = {
   // Current authenticated user (null when logged out)
@@ -1080,7 +1081,7 @@ export const Auth = {
     if (this.supabase?.auth && typeof this.supabase.auth.resetPasswordForEmail === 'function') {
       try {
         const { error } = await this.supabase.auth.resetPasswordForEmail(cleanEmail, {
-          redirectTo: window.location.origin + window.location.pathname
+          redirectTo: AppConfig.getPasswordResetRedirectUrl()
         });
         if (error) throw error;
         return {

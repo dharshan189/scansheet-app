@@ -4,6 +4,8 @@
  * Enforces native persistent sessions, automatic token refresh, and URL recovery detection.
  */
 
+import { AppConfig } from './app-config.js';
+
 class SupabaseService {
   constructor() {
     this.client = null;
@@ -16,7 +18,8 @@ class SupabaseService {
 
   /**
    * Initialize Supabase client
-   * Resolves credentials from /api/config, window.__ENV__, or localStorage overrides
+   * Resolves credentials from /api/config (via full HTTPS Vercel URL on Capacitor),
+   * window.__ENV__, or localStorage overrides. Never stores secret/service-role keys.
    */
   async init() {
     if (this.initPromise) return this.initPromise;
@@ -27,32 +30,53 @@ class SupabaseService {
         let url = window.__ENV__?.SUPABASE_URL || window.SUPABASE_URL || null;
         let anonKey = window.__ENV__?.SUPABASE_ANON_KEY || window.SUPABASE_ANON_KEY || null;
 
-        // 2. Fetch from backend /api/config if not defined in window
-        if (!url || !anonKey) {
+        // 2. Fetch public config from Vercel / backend /api/config
+        const configEndpoint = AppConfig.resolveApiUrl('/api/config');
+        if (configEndpoint && (!url || !anonKey || !window.PADDLE_OCR_API_URL)) {
           try {
-            const resp = await fetch('/api/config', { cache: 'no-store' });
+            const resp = await fetch(configEndpoint, { cache: 'no-store' });
             if (resp.ok) {
-              const data = await resp.json();
-              url = data.supabaseUrl || url;
-              anonKey = data.supabaseAnonKey || anonKey;
-              if (data.ocrServerUrl && !window.PADDLE_OCR_API_URL) {
-                const trimmed = data.ocrServerUrl.replace(/\/+$/, '');
-                window.PADDLE_OCR_API_URL = trimmed.endsWith('/api/scan') ? trimmed : `${trimmed}/api/scan`;
+              const contentType = resp.headers.get('content-type') || '';
+              if (contentType.includes('application/json')) {
+                const data = await resp.json();
+                url = data.supabaseUrl || url;
+                anonKey = data.supabaseAnonKey || anonKey;
+                if (data.ocrServerUrl && !window.PADDLE_OCR_API_URL) {
+                  const trimmed = data.ocrServerUrl.replace(/\/+$/, '');
+                  window.PADDLE_OCR_API_URL = trimmed.endsWith('/api/scan') || trimmed.endsWith('/api/ocr')
+                    ? trimmed
+                    : `${trimmed}/api/scan`;
+                }
+                if (url && anonKey) {
+                  try {
+                    localStorage.setItem('scansheet_supabase_config', JSON.stringify({
+                      url,
+                      anonKey,
+                      ocrServerUrl: data.ocrServerUrl || ''
+                    }));
+                  } catch (_) {}
+                }
               }
             }
           } catch (netErr) {
-            // Backend config not reachable (e.g. static host without serverless function)
+            // Backend config not reachable (e.g. offline or static host without serverless function)
           }
         }
 
-        // 3. Check for developer localStorage configuration fallback
-        if (!url || !anonKey) {
+        // 3. Check for cached / developer localStorage configuration fallback
+        if (!url || !anonKey || !window.PADDLE_OCR_API_URL) {
           try {
             const localCfg = localStorage.getItem('scansheet_supabase_config');
             if (localCfg) {
               const parsed = JSON.parse(localCfg);
-              url = parsed.url || url;
-              anonKey = parsed.anonKey || anonKey;
+              url = url || parsed.url || null;
+              anonKey = anonKey || parsed.anonKey || null;
+              if (parsed.ocrServerUrl && !window.PADDLE_OCR_API_URL) {
+                const trimmed = parsed.ocrServerUrl.replace(/\/+$/, '');
+                window.PADDLE_OCR_API_URL = trimmed.endsWith('/api/scan') || trimmed.endsWith('/api/ocr')
+                  ? trimmed
+                  : `${trimmed}/api/scan`;
+              }
             }
           } catch (_) {}
         }

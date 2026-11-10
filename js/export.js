@@ -9,12 +9,77 @@
  *  5. Multi-File Export - Simultaneous download or single ZIP bundle (.zip via JSZip)
  */
 
+import { AppConfig } from './app-config.js';
+
 export const DocumentExporter = {
+  blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const res = String(reader.result || '');
+        const commaIdx = res.indexOf(',');
+        resolve(commaIdx >= 0 ? res.slice(commaIdx + 1) : res);
+      };
+      reader.onerror = () => reject(reader.error || new Error('Failed to encode file for export.'));
+      reader.readAsDataURL(blob);
+    });
+  },
+
+  async saveAndShareNative(entries) {
+    const Filesystem = window.Capacitor?.Plugins?.Filesystem;
+    const Share = window.Capacitor?.Plugins?.Share;
+    if (!Filesystem) {
+      throw new Error('Android Filesystem plugin is unavailable.');
+    }
+
+    const fileUris = [];
+    for (const entry of entries) {
+      const safeName = String(entry.filename || 'ScanSheet_Export.bin')
+        .trim()
+        .replace(/[/\\?%*:|"<>]/g, '_');
+      const base64Data = await this.blobToBase64(entry.blob);
+      const saved = await Filesystem.writeFile({
+        path: `exports/${safeName}`,
+        data: base64Data,
+        directory: 'CACHE',
+        recursive: true
+      });
+      if (saved?.uri) {
+        fileUris.push(saved.uri);
+      } else if (typeof Filesystem.getUri === 'function') {
+        const uriRes = await Filesystem.getUri({
+          path: `exports/${safeName}`,
+          directory: 'CACHE'
+        });
+        if (uriRes?.uri) fileUris.push(uriRes.uri);
+      }
+    }
+
+    if (Share && fileUris.length > 0) {
+      try {
+        await Share.share({
+          title: entries.length === 1 ? entries[0].filename : 'ScanSheet Exports',
+          files: fileUris,
+          dialogTitle: entries.length === 1
+            ? `Save or Share ${entries[0].filename}`
+            : 'Save or Share Exported Files'
+        });
+      } catch (shareErr) {
+        const msg = String(shareErr?.message || shareErr || '').toLowerCase();
+        if (!msg.includes('cancel')) {
+          throw shareErr;
+        }
+      }
+    }
+
+    return fileUris;
+  },
+
   /**
-   * Helper to trigger native browser file download from Blob
-   * Robust against mobile Safari, Android DownloadManager, Chrome and Edge
+   * Helper to trigger native browser file download from Blob (or Capacitor native Share/Save)
+   * Robust against mobile Safari, Android DownloadManager, Capacitor WebView, Chrome and Edge
    */
-  downloadBlob(blob, filename) {
+  async downloadBlob(blob, filename) {
     if (!blob) {
       console.error('[DocumentExporter] downloadBlob called with empty blob');
       throw new Error('File generation failed. Blob is empty.');
@@ -34,12 +99,20 @@ export const DocumentExporter = {
         mimeType = 'image/png';
       } else if (cleanFilename.endsWith('.zip')) {
         mimeType = 'application/zip';
+      } else if (cleanFilename.endsWith('.csv')) {
+        mimeType = 'text/csv;charset=utf-8';
       }
     }
 
     const typedBlob = (blob.type === mimeType) ? blob : new Blob([blob], { type: mimeType });
 
-    // Native mobile share sheet on mobile devices when supported
+    // Native Capacitor Android / iOS: write to app cache & invoke native Share / Save sheet
+    if (AppConfig.isCapacitorNative() && window.Capacitor?.Plugins?.Filesystem) {
+      await this.saveAndShareNative([{ blob: typedBlob, filename: cleanFilename }]);
+      return;
+    }
+
+    // Native mobile share sheet on mobile web browsers when supported
     if (typeof navigator !== 'undefined' && navigator.canShare && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
       try {
         const file = new File([typedBlob], cleanFilename, { type: mimeType });
@@ -339,7 +412,7 @@ export const DocumentExporter = {
 
   async exportWord(docData, filename = 'ScanSheet_Converted_Document.docx') {
     const blob = await this.generateWordBlob(docData);
-    this.downloadBlob(blob, filename);
+    await this.downloadBlob(blob, filename);
     return true;
   },
 
@@ -517,7 +590,7 @@ export const DocumentExporter = {
 
   async exportPDF(docData, filename = 'ScanSheet_Converted_Document.pdf') {
     const blob = await this.generatePdfBlob(docData);
-    this.downloadBlob(blob, filename);
+    await this.downloadBlob(blob, filename);
     return true;
   },
 
@@ -652,7 +725,7 @@ export const DocumentExporter = {
 
   async exportImage(docData, filename = 'ScanSheet_Converted_Image.png') {
     const blob = await this.generateImageBlob(docData);
-    this.downloadBlob(blob, filename);
+    await this.downloadBlob(blob, filename);
     return true;
   },
 
@@ -740,8 +813,8 @@ export const DocumentExporter = {
     return new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   },
 
-  exportExcel(docData, filename = 'ScanSheet_Converted_Table.xlsx') {
-    const isMobile = typeof navigator !== 'undefined' && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+  async exportExcel(docData, filename = 'ScanSheet_Converted_Table.xlsx') {
+    const isMobile = AppConfig.isCapacitorNative() || (typeof navigator !== 'undefined' && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent));
     if (!isMobile && window.XLSX && typeof window.XLSX.writeFile === 'function') {
       try {
         const wb = this.createExcelWorkbook(docData);
@@ -753,7 +826,7 @@ export const DocumentExporter = {
     }
 
     const blob = this.generateExcelBlob(docData);
-    this.downloadBlob(blob, filename);
+    await this.downloadBlob(blob, filename);
     return true;
   },
 
@@ -810,8 +883,11 @@ export const DocumentExporter = {
         const u8 = await zip.generateAsync({ type: 'uint8array' });
         zipBlob = new Blob([u8], { type: 'application/zip' });
       }
-      this.downloadBlob(zipBlob, 'ScanSheet_Exports_Bundle.zip');
+      await this.downloadBlob(zipBlob, 'ScanSheet_Exports_Bundle.zip');
       return { count: filesToExport.length, bundle: 'ScanSheet_Exports_Bundle.zip' };
+    } else if (AppConfig.isCapacitorNative() && window.Capacitor?.Plugins?.Filesystem) {
+      await this.saveAndShareNative(filesToExport.map(f => ({ blob: f.blob, filename: f.name })));
+      return { count: filesToExport.length, files: filesToExport.map(f => f.name) };
     } else {
       // Download all individually with safe spacing
       for (let i = 0; i < filesToExport.length; i++) {
@@ -819,7 +895,7 @@ export const DocumentExporter = {
         if (i > 0) {
           await new Promise(r => setTimeout(r, 400));
         }
-        this.downloadBlob(file.blob, file.name);
+        await this.downloadBlob(file.blob, file.name);
       }
       return { count: filesToExport.length, files: filesToExport.map(f => f.name) };
     }
