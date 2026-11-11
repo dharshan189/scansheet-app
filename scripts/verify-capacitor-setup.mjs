@@ -39,6 +39,10 @@ function testWebAssetsAndSecrets() {
     for (const forbidden of ['.env', '.env.local', 'api', 'supabase', 'ocr_server.py', 'ocr_pipeline.py', 'android', 'node_modules']) {
       assert.ok(!fs.existsSync(path.join(baseDir, forbidden)), `Forbidden path ${forbidden} found in ${baseDir}`);
     }
+
+    const indexHtml = fs.readFileSync(path.join(baseDir, 'index.html'), 'utf8');
+    assert.ok(indexHtml.includes('id="app-splash-screen"'), `Missing splash screen markup in ${baseDir}/index.html`);
+    assert.ok(indexHtml.includes('appSplashProgress 2s'), `Missing 2s splash loading bar animation in ${baseDir}/index.html`);
   }
   console.log('PASS: www/ and android assets verified free of backend/env files');
 }
